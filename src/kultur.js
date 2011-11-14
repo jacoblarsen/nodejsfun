@@ -1,10 +1,12 @@
 var jsdom  = require("jsdom"),
-    window = jsdom.jsdom().createWindow();
-var http = require('http');
-var request = require('request'),
-    sys = require('sys');
+    window = jsdom.jsdom().createWindow(),
+    http = require('http'),
+    request = require('request'),
+    sys = require('sys'),
+    fs = require('fs'),
+    jquery = fs.readFileSync("jquery-1.6.min.js").toString();
 
-var _prefix = "http://www.kb.dk/";
+var _prefix = "http://www.kb.dk";
 var _default = "/da/materialer/kulturarv/fagopdeling/Stikord.html";
 
 var da2dc = new Array();
@@ -21,21 +23,24 @@ da2dc["Kontaktperson"] = "rightsHolder";
 da2dc["Metadata"] = "conformsTo";
 
 http.createServer(function (req, res) {
-     var init = new Date().getTime();
+    var init = new Date().getTime();
     var format = "text/html";
+
     if(req.headers.accept != undefined){
         format = req.headers.accept.split(',')[0]; // text/html or application/(solr+)xml
     }
     if(req.url === "/")
         req.url = _default;
     res.writeHead(200, {'Content-Type': format.replace("solr+","")});
+    console.log(_prefix + req.url);
     jsdom.env({
         html: _prefix + req.url,
-        scripts: [
-            'http://code.jquery.com/jquery-1.6.min.js'
+        src: [
+            jquery
         ],
         done: function(errors, window) {
-             var start = new Date().getTime();
+
+            var start = new Date().getTime();
             // The different tpe of lists
             if(req.url.indexOf('fagopdeling/index.html') > -1){
                 res.end(parseAllDisciplins(window.$,format));
@@ -45,14 +50,33 @@ http.createServer(function (req, res) {
                 res.end(parseSubjects(window.$,format));
             } else {// An item
                 res.end(parseItem(req.url, window.$,format)); // Show response
+
                 if(format === "text/html"){
                     var addDoc = parseItem(req.url, window.$,"application/solr+xml")// Build Solr document
-                    request({
-                        url    : 'http://localhost:8983/solr/update',
-                        method : 'POST',
-                        body   : addDoc
+                    /*
+                    window.$.ajax({
+                        //type : "GET",
+                        //data: "", //addDoc,
+                        dataType: "jsonp",
+                        jsonp: "json.wrf",
+                        //timeout: 5000,
+                        url:  'http://localhost:8983/solr/update?wt=json&commit=true&json.wrf=jsonpSuc',
+                        succes: function (a,b,c){
+                            console.log("success: " + a + ", " + b + ", " + c);
+                        },
+                        error: function (a,b,c){
+                            console.log("error: " + a + ", " + b + ", " + c);
+                        }
                     });
+                    */
+
+                     request({
+                     url    : 'http://localhost:8983/solr/update?commit=true',
+                     method : 'POST',
+                     body   : addDoc
+                     });
                 }
+
             }
             var fetch = start - init;
             var parse = new Date().getTime() - start;
@@ -62,6 +86,10 @@ http.createServer(function (req, res) {
 
 }).listen(80, "127.0.0.1");
 console.log('Server running at http://127.0.0.1');
+
+function jsonpSuc(){
+    console.log("callback from solr");
+}
 
 function parseItem(url, $, format){
     var out = getHead($('.articleBody > h1').text().trim(), format);
@@ -229,6 +257,7 @@ function parseAllDisciplins($, format){
 }
 
 function parseSubjects($, format){
+    console.log("parse subjects");
     var out = getHead($('div.articleBody > h1').text().trim(), format)
     out += '<body><h1>' + $('div.articleBody > h1').text().trim() + '</h1>';
     out += '<p>' + $('div.articleBody > p').text().trim() + '</p>';

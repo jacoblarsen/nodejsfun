@@ -4,7 +4,9 @@ var jsdom  = require("jsdom"),
     request = require('request'),
     sys = require('sys'),
     fs = require('fs'),
-    jquery = fs.readFileSync("jquery-1.6.min.js").toString();
+    jquery = fs.readFileSync("jquery-1.6.min.js").toString(),
+    async = require('async');
+
 
 var _prefix = "http://www.kb.dk";
 var _default = "/da/materialer/kulturarv/fagopdeling/Stikord.html";
@@ -49,34 +51,17 @@ http.createServer(function (req, res) {
             }else if(req.url.indexOf('fagopdeling') > -1 || req.url.indexOf('materialetyper') > -1) {
                 res.end(parseSubjects(window.$,format));
             } else {// An item
-                res.end(parseItem(req.url, window.$,format)); // Show response
-
                 if(format === "text/html"){
-                    var addDoc = parseItem(req.url, window.$,"application/solr+xml")// Build Solr document
-                    /*
-                    window.$.ajax({
-                        //type : "GET",
-                        //data: "", //addDoc,
-                        dataType: "jsonp",
-                        jsonp: "json.wrf",
-                        //timeout: 5000,
-                        url:  'http://localhost:8983/solr/update?wt=json&commit=true&json.wrf=jsonpSuc',
-                        succes: function (a,b,c){
-                            console.log("success: " + a + ", " + b + ", " + c);
-                        },
-                        error: function (a,b,c){
-                            console.log("error: " + a + ", " + b + ", " + c);
-                        }
-                    });
-                    */
-
-                     request({
-                     url    : 'http://localhost:8983/solr/update?commit=true',
-                     method : 'POST',
-                     body   : addDoc
-                     });
+                    async.parallel([
+                        function() { res.end(parseItem(req.url, window.$,format)); }, // Show response
+                        function() { var addDoc = parseItem(req.url, window.$,"application/solr+xml");// Build Solr document
+                        request({
+                            url    : 'http://localhost:8983/solr/update?commit=true',
+                            method : 'POST',
+                            body   : addDoc
+                        });}
+                    ],console.log("done!"));
                 }
-
             }
             var fetch = start - init;
             var parse = new Date().getTime() - start;
@@ -166,7 +151,11 @@ function getHead(title, format){
             break;
         default:return "<!DOCTYPE html>" +
             "<html><head><title>"+title+"</title>" +
-            "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" /></head>";
+            "<meta name='viewport' content='width=device-width, initial-scale=1'/> " +
+            "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\" />" +
+            "<link rel='stylesheet' href='http://code.jquery.com/mobile/1.0rc3/jquery.mobile-1.0rc3.min.css' />" +
+            "<script src='http://code.jquery.com/jquery-1.6.4.min.js'></script>" +
+            "<script src='http://code.jquery.com/mobile/1.0rc3/jquery.mobile-1.0rc3.min.js'></script></head>";
             break;
     }
 }
@@ -180,7 +169,10 @@ function getFooter(url, format){
         case "application/solr+xml": return "<field name=\"id\">"+url+"</field>" +
             "</doc></add>";
             break;
-        default:return "</body></html>";
+        default:return "<div data-role='footer' data-theme='b'>" +
+            "<a rel='external' href='/da/materialer/kulturarv/fagopdeling/Stikord.html' data-role='button'>Emner</a>" +
+            "<a rel='external' href='/da/materialer/kulturarv/fagopdeling/index.html' data-role='button'>Fagområder</a>" +
+            "</div></div></body></html>";
             break;
     }
 }
@@ -193,7 +185,7 @@ function getHeading(heading, format){
             break;
         case "application/solr+xml": return "";
             break;
-        default:return "<body><h1>"+heading+"</h1>";
+        default:return "<body><div data-role='page'><div data-role='header' data-theme='b'><h1>"+heading+"</h1></div>";
             break;
     }
 }
@@ -228,46 +220,54 @@ function getLinkAndDescription(elem, format){
 // Boring functions returning lists
 function parseAllSubjects($, format){
     var out = getHead("Emner",format)
-    out += '<body><h1>Emner</h1><ul>';
+    out += getHeading("Emner", format);
+    out += "<div data-role='content'>";
+    out += "<ul data-role='listview' data-filter='true' data-theme='c'>";
     $('.articleBody > p > a').each(function(){
         out += '<li>';
-        out += '<a href="'+$(this).attr('href')+'">' + $(this).text() + "</a>";
+        out += '<a rel="external" href="'+$(this).attr('href')+'">' + $(this).text() + "</a>";
         out += '</li>';
     });
-    out += '</ul></body></html>';
+    out += '</ul></div>';
+    out += getFooter("", format);
     return out;
 }
 
 function parseAllDisciplins($, format){
     var out = getHead("Fagområder",format)
-    out += '<body><h1>Fagområder</h1><ul>';
+    out += getHeading("Fagområder", format);
+    out += "<div data-role='content'>";
+    out += "<ul data-role='listview' data-filter='true' data-theme='c'>";
     $('.articleBody > ul > li').each(function(){
         out += '<li>';
-        out += '<a href="'+$(this).children('a').attr('href')+'">' + $(this).children('a').text() + "</a>";
-        out += '<ul>';
+        out += '<a rel="external" href="'+$(this).children('a').attr('href')+'">' + $(this).children('a').text() + "</a>";
+        //out += '<ul>';
+        out += '</li>';
         $(this).find('li > a').each(function(){
             out += '<li>';
-            out += '<a href="'+$(this).attr('href')+'">' + $(this).text() + "</a>";
+            out += '<a rel="external" href="'+$(this).attr('href')+'">' + $(this).text() + "</a>";
             out += '</li>';
         });
-        out += '</ul></li>';
+        //out += '</ul></li>';
     });
-    out += '</ul></body></html>';
+    out += '</ul></div>';
+    out += getFooter("", format);
     return out;
 }
 
 function parseSubjects($, format){
-    console.log("parse subjects");
     var out = getHead($('div.articleBody > h1').text().trim(), format)
-    out += '<body><h1>' + $('div.articleBody > h1').text().trim() + '</h1>';
+    out += getHeading($('div.articleBody > h1').text().trim(), format);
+    out += "<div data-role='content'>";
     out += '<p>' + $('div.articleBody > p').text().trim() + '</p>';
-    out += '<ul>';
+    out += "<ul data-role='listview' data-filter='true' data-theme='c'>";
     $('div.teaser.standard01').each(function(){
         out += '<li>';
-        out += '<a href="'+ $(this).find('h1 > a').attr('href')+'">' + $(this).find('h1 > a').text().trim() + "</a>";
+        out += '<a rel="external" href="'+ $(this).find('h1 > a').attr('href')+'">' + $(this).find('h1 > a').text().trim() + "</a>";
         out += '<p>' + $(this).find('p').text().trim() + "</p>";
         out += '</li>';
     });
-    out += '</ul></body></html>';
+    out += '</ul></div>';
+    out += getFooter("", format);
     return out;
 }
